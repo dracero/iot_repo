@@ -7,6 +7,7 @@ from typing import Optional
 class Lectura(BaseModel):
     sensor_id: str
     valor: float
+    timestamp: Optional[str] = None
 
 # Configuración MQTT usando test.mosquitto.org
 mqtt_config = MQTTConfig(
@@ -37,6 +38,7 @@ async def recibir_telemetria(client, topic, payload, qos, properties):
         import json
         data_dict = json.loads(payload.decode())
         ultimo_dato = Lectura(**data_dict)
+        print(f"[{ultimo_dato.timestamp}] Recibido: {ultimo_dato}")
     except Exception as e:
         print(f"Error procesando mensaje: {e}")
 
