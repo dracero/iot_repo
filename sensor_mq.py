@@ -1,0 +1,47 @@
+import random
+import time
+import json
+import paho.mqtt.client as mqtt
+
+class SensorVirtual:
+    def __init__(self, id, tipo):
+        self.id = id
+        self.tipo = tipo
+    
+    def leer_valor(self):
+        if self.tipo == "temperatura":
+            return round(random.uniform(18, 30), 2)
+        return random.randint(0, 100)
+
+sensor = SensorVirtual("S-001", "temperatura")
+broker_address = "test.mosquitto.org"
+topic = "iot/telemetria"
+
+print(f"Conectando al broker {broker_address}...")
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+try:
+    client.connect(broker_address, 1883, 60)
+except Exception as e:
+    print(f"Error conectando al broker: {e}")
+    exit(1)
+
+client.loop_start()
+
+print(f"Iniciando publicación en topico '{topic}'")
+
+try:
+    while True:
+        valor = sensor.leer_valor()
+        datos = {"sensor_id": sensor.id, "valor": valor}
+        payload = json.dumps(datos)
+        
+        info = client.publish(topic, payload)
+        info.wait_for_publish()
+        
+        print(f"Publicado: {payload}")
+        time.sleep(2)
+
+except KeyboardInterrupt:
+    print("Deteniendo sensor...")
+    client.loop_stop()
+    client.disconnect()
