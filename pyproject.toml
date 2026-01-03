@@ -11,4 +11,6 @@ dependencies = [
     "uvicorn>=0.29.0",
     "fastapi-mqtt",
     "paho-mqtt",
+    "websockets>=15.0.1",
+    "aiocoap>=0.4.17",
 ]
