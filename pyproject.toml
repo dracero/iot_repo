@@ -13,4 +13,6 @@ dependencies = [
     "paho-mqtt",
     "websockets>=15.0.1",
     "aiocoap>=0.4.17",
+    "certifi>=2025.11.12",
+    "truststore>=0.10.4",
 ]

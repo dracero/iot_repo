@@ -1,6 +1,8 @@
 import random
 import time
 import json
+import ssl
+import os
 import paho.mqtt.client as mqtt
 
 class SensorVirtual:
@@ -16,11 +18,13 @@ class SensorVirtual:
 sensor = SensorVirtual("S-001", "temperatura")
 broker_address = "test.mosquitto.org"
 topic = "iot/telemetria"
+ca_cert = os.path.join(os.path.dirname(__file__), "certs", "mosquitto.org.crt")
 
-print(f"Conectando al broker {broker_address}...")
+print(f"Conectando al broker {broker_address} con TLS...")
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+client.tls_set(ca_certs=ca_cert)  # Habilitar TLS con certificado CA local
 try:
-    client.connect(broker_address, 1883, 60)
+    client.connect(broker_address, 8883, 60)  # Puerto TLS
 except Exception as e:
     print(f"Error conectando al broker: {e}")
     exit(1)

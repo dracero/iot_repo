@@ -1,3 +1,5 @@
+import ssl
+import os
 import uvicorn
 from fastapi import FastAPI
 from fastapi_mqtt import FastMQTT, MQTTConfig
@@ -9,11 +11,16 @@ class Lectura(BaseModel):
     valor: float
     timestamp: Optional[str] = None
 
-# Configuración MQTT usando test.mosquitto.org
+# Crear contexto SSL con el certificado CA de mosquitto.org
+ssl_context = ssl.create_default_context()
+ssl_context.load_verify_locations(os.path.join(os.path.dirname(__file__), "certs", "mosquitto.org.crt"))
+
+# Configuración MQTT usando test.mosquitto.org con TLS
 mqtt_config = MQTTConfig(
     host="test.mosquitto.org",
-    port=1883,
+    port=8883,  # Puerto TLS
     keepalive=60,
+    ssl=ssl_context  # Contexto SSL con certificado CA local
 )
 
 app = FastAPI()
