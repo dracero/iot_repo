@@ -3,6 +3,7 @@ import time
 import json
 import ssl
 import os
+from datetime import datetime
 import paho.mqtt.client as mqtt
 
 class SensorVirtual:
@@ -36,7 +37,8 @@ print(f"Iniciando publicación en topico '{topic}'")
 try:
     while True:
         valor = sensor.leer_valor()
-        datos = {"sensor_id": sensor.id, "valor": valor}
+        timestamp = datetime.now().isoformat()
+        datos = {"sensor_id": sensor.id, "valor": valor, "timestamp": timestamp}
         payload = json.dumps(datos)
         
         info = client.publish(topic, payload)
