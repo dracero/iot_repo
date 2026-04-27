@@ -1,4 +1,6 @@
 import json
+import ssl
+import os
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -12,10 +14,11 @@ class Lectura(BaseModel):
     valor: float
     timestamp: Optional[str] = None
 
-# Configuración MQTT (mismo broker y tópico que sensor_er.py)
-BROKER = "localhost"
-PORT = 1883
-TOPIC = "fadena/test"
+# Configuración MQTT
+BROKER  = "localhost"
+PORT    = 8883
+TOPIC   = "fadena/test"
+CA_CERT = os.path.expanduser("~/.mosquitto/certs/ca.crt")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,8 +33,8 @@ app = FastAPI(lifespan=lifespan)
 ultimo_dato: Optional[Lectura] = None
 mensajes_recibidos: list = []
 
-def on_connect(client, userdata, flags, rc, properties=None):
-    print(f"Conectado al broker MQTT con código: {rc}")
+def on_connect(client, userdata, flags, reason_code, properties):
+    print(f"Conectado al broker MQTT con código: {reason_code}")
     client.subscribe(TOPIC)
     print(f"Suscrito al tópico: {TOPIC}")
 
@@ -50,8 +53,9 @@ def on_message(client, userdata, msg):
     except Exception as e:
         print(f"Error procesando mensaje: {e}")
 
-# Inicializar cliente MQTT
-mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+# Inicializar cliente MQTT con TLS
+mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"lectura-er-{os.getpid()}")
+mqtt_client.tls_set(ca_certs=CA_CERT)
 mqtt_client.on_connect = on_connect
 mqtt_client.on_message = on_message
 

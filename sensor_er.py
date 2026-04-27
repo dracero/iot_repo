@@ -3,25 +3,28 @@ import json
 import random
 import subprocess
 import socket
+import ssl
+import os
 import time
 from datetime import datetime
 import paho.mqtt.client as mqtt
 
 # ── Configuración ─────────────────────────────────────────────────────────────
 
-BROKER = "localhost"
-PORT   = 1883
-TOPIC  = "fadena/test"
+BROKER   = "localhost"
+PORT     = 8883
+TOPIC    = "fadena/test"
+CA_CERT  = os.path.expanduser("~/.mosquitto/certs/ca.crt")
 
 # ── Mosquitto local ───────────────────────────────────────────────────────────
 
 def _broker_running() -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex((BROKER, PORT)) == 0
+        return s.connect_ex(("localhost", 8883)) == 0
 
 def start_broker():
     if _broker_running():
-        print("Broker Mosquitto ya está corriendo.")
+        print("Broker Mosquitto TLS ya está corriendo.")
         return None
 
     mosquitto_path = subprocess.run(
@@ -32,15 +35,21 @@ def start_broker():
         print("ERROR: Mosquitto no está instalado. Instalalo con: sudo apt install mosquitto")
         exit(1)
 
-    print("Iniciando broker Mosquitto local...")
+    conf_file = os.path.expanduser("~/.mosquitto/mosquitto.conf")
+    if not os.path.exists(conf_file):
+        print(f"ERROR: Archivo de configuración no encontrado: {conf_file}")
+        print("Ejecutá primero: ./setup_mosquitto_tls.sh")
+        exit(1)
+
+    print("Iniciando broker Mosquitto con TLS...")
     proc = subprocess.Popen(
-        ["mosquitto", "-p", str(PORT)],
+        ["mosquitto", "-c", conf_file],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     for _ in range(50):
         if _broker_running():
-            print(f"Broker Mosquitto listo en {BROKER}:{PORT}")
+            print("Broker Mosquitto listo en localhost:8883 (TLS)")
             return proc
         time.sleep(0.1)
     raise RuntimeError("Mosquitto no levantó a tiempo.")
@@ -65,22 +74,43 @@ class SensorVirtual:
             return round(random.uniform(18, 30), 2)
         return random.randint(0, 100)
 
-# Configuración MQTT
-BROKER = "localhost"
-PORT = 1883
-TOPIC = "fadena/test"
-
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 broker_proc = start_broker()
 
-# Inicializar cliente MQTT
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+# ── Cliente MQTT con TLS ──────────────────────────────────────────────────────
+
+connected = False
+
+def on_connect(client, userdata, flags, reason_code, properties):
+    global connected
+    print(f"on_connect llamado: reason_code={reason_code}, type={type(reason_code)}")
+    if reason_code == 0 or str(reason_code) == "Success":
+        connected = True
+        print(f"Conectado a {BROKER}:{PORT}")
+    else:
+        print(f"Error de conexión MQTT, código: {reason_code}")
+
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"sensor-er-{os.getpid()}")
+client.tls_set(ca_certs=CA_CERT)
+client.on_connect = on_connect
+
 try:
     client.connect(BROKER, PORT, 60)
     client.loop_start()
 except Exception as e:
     print(f"Error fatal conectando al broker: {e}")
+    stop_broker(broker_proc)
+    exit(1)
+
+# Esperar hasta que la conexión TLS esté establecida (máx 10s)
+for _ in range(100):
+    if connected:
+        break
+    time.sleep(0.1)
+else:
+    print("Error: No se pudo conectar al broker en 10 segundos.")
+    stop_broker(broker_proc)
     exit(1)
 
 async def enviar_con_reintento(data):
