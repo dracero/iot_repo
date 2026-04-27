@@ -6,11 +6,26 @@ Este proyecto simula un sistema IoT simple con diferentes protocolos de comunica
 
 - Python 3.12+
 - `uv` (recomendado) o `pip`
+- Mosquitto (para `lectura_er` y `sensor_er`)
 
 ## Instalación
 
 ```bash
 uv sync
+```
+
+### Instalar Mosquitto (broker MQTT local)
+
+Requerido para `sensor_er.py` y `lectura_er.py`. Solo necesitás instalarlo — `sensor_er.py` lo levanta automáticamente al ejecutarse.
+
+```bash
+sudo apt update && sudo apt install -y mosquitto mosquitto-clients
+```
+
+Verificar que está instalado:
+
+```bash
+which mosquitto
 ```
 
 ## Ejecución
@@ -37,12 +52,17 @@ uv run python sensor.py
 
 ### MQTT (Message Queue Telemetry Transport)
 
-Estos scripts demuestran el protocolo MQTT para mensajería IoT.
+Estos scripts demuestran el protocolo MQTT para mensajería IoT usando el broker público **mqtt-dashboard.com** en el puerto **1883**.
+
+El broker es compartido con el ESP32 en Wokwi, por lo que `lectura_mq.py` también recibe los datos del ESP32.
 
 **1. Primero - Suscriptor (Lectura):**
 ```bash
 uv run python lectura_mq.py
 ```
+Servidor en http://localhost:8001 con endpoints:
+- `/telemetria` - Último dato recibido
+- `/telemetria/historial` - Últimos 10 mensajes
 
 **2. Después - Publicador (Sensor):**
 ```bash
@@ -53,16 +73,19 @@ uv run python sensor_mq.py
 
 ### MQTT con Simulación de Errores
 
-Estos scripts demuestran MQTT con lógica de reintentos y simulación de errores de red/hardware.
+Estos scripts demuestran MQTT con lógica de reintentos y simulación de errores de red/hardware usando **Mosquitto local** en el puerto **1883**.
 
-**1. Primero - Suscriptor (Lectura):**
-```bash
-uv run python lectura_er.py
-```
+> Requiere Mosquitto instalado (ver sección de instalación arriba).
+> `sensor_er.py` levanta Mosquitto automáticamente al ejecutarse. Iniciá siempre `sensor_er.py` antes que `lectura_er.py`.
 
-**2. Después - Publicador (Sensor con errores simulados):**
+**1. Primero - Publicador (levanta Mosquitto y publica datos):**
 ```bash
 uv run python sensor_er.py
+```
+
+**2. Después - Suscriptor (Lectura):**
+```bash
+uv run python lectura_er.py
 ```
 
 El servidor estará en http://localhost:8002 con endpoints:
@@ -105,11 +128,9 @@ uv run python coap_client.py
 
 ### ESP32 con Wokwi
 
-El script `esp32_mqtt.py` se utiliza para conectarse a la simulación de ESP32 en Wokwi.
+El script `esp32_mqtt.py` corre en el simulador [Wokwi](https://wokwi.com) sobre un ESP32 con sensor DHT22. Publica datos de temperatura y humedad en el broker **mqtt-dashboard.com:1883**, tópico `fadena/test`.
 
-```bash
-uv run python esp32_mqtt.py
-```
+Para ver los datos en tu PC, corré `lectura_mq.py` que escucha el mismo broker y tópico.
 
 ---
 
@@ -135,8 +156,8 @@ Para analizar el tráfico de cada protocolo, abre Wireshark en la interfaz `lo` 
 | Protocolo | Filtro Wireshark | Puerto |
 |-----------|------------------|--------|
 | **HTTP** (lectura + sensor) | `tcp.port == 8000` | 8000 |
-| **MQTT** (lectura_mq + sensor_mq) | `mqtt` o `tcp.port == 8883` | 8883 (TLS) |
-| **MQTT** (lectura_er + sensor_er) | `mqtt` o `tcp.port == 1883` | 1883 |
+| **MQTT** (lectura_mq + sensor_mq + ESP32) | `tcp.port == 1883` | 1883 (mqtt-dashboard.com) |
+| **MQTT con errores** (lectura_er + sensor_er) | `tcp.port == 1883` | 1883 (Mosquitto local) |
 | **WebSocket** (ws_server + ws_client) | `websocket` o `tcp.port == 8000` | 8000 |
 | **CoAP** (coap_server + coap_client) | `coap` o `udp.port == 5683` | 5683 |
 

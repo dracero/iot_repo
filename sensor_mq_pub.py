@@ -1,6 +1,7 @@
 import asyncio
 import random
 import json
+import uuid
 import uvicorn
 from datetime import datetime
 from fastapi import FastAPI
@@ -12,7 +13,8 @@ from fastapi_mqtt import FastMQTT, MQTTConfig
 mqtt_config = MQTTConfig(
     host="broker.hivemq.com",
     port=1883,
-    keepalive=60
+    keepalive=60,
+    client_id=f"fadena-{uuid.uuid4().hex[:8]}"  # ID único por instancia
 )
 
 app = FastAPI(title="Simulador de Sensor MQTT")
@@ -45,14 +47,10 @@ async def simulate_sensor_readings():
         # Esperar 5 segundos antes de la próxima lectura
         await asyncio.sleep(5)
 
-@app.on_event("startup")
-async def startup_event():
-    # Iniciar la tarea de simulación al arrancar la app
-    asyncio.create_task(simulate_sensor_readings())
-
 @fast_mqtt.on_connect()
 def connect(client, flags, rc, properties):
     print(f"Conectado al broker MQTT: {mqtt_config.host}")
+    asyncio.create_task(simulate_sensor_readings())
 
 @app.get("/")
 async def root():

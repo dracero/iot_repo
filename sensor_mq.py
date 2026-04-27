@@ -1,49 +1,52 @@
 import random
 import time
 import json
-import ssl
-import os
 from datetime import datetime
 import paho.mqtt.client as mqtt
 
+# ── Configuración ─────────────────────────────────────────────────────────────
+
+BROKER = "mqtt-dashboard.com"
+PORT   = 1883
+TOPIC  = "fadena/test"
+
+# ── Sensor virtual ────────────────────────────────────────────────────────────
+
 class SensorVirtual:
     def __init__(self, id, tipo):
-        self.id = id
+        self.id   = id
         self.tipo = tipo
-    
+
     def leer_valor(self):
         if self.tipo == "temperatura":
             return round(random.uniform(18, 30), 2)
         return random.randint(0, 100)
 
-sensor = SensorVirtual("S-001", "temperatura")
-broker_address = "test.mosquitto.org"
-topic = "iot/telemetria"
-ca_cert = os.path.join(os.path.dirname(__file__), "certs", "mosquitto.org.crt")
+# ── Main ──────────────────────────────────────────────────────────────────────
 
-print(f"Conectando al broker {broker_address} con TLS...")
+sensor = SensorVirtual("S-001", "temperatura")
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-client.tls_set(ca_certs=ca_cert)  # Habilitar TLS con certificado CA local
+
+print(f"Conectando a broker {BROKER}:{PORT}...")
 try:
-    client.connect(broker_address, 8883, 60)  # Puerto TLS
+    client.connect(BROKER, PORT, 60)
 except Exception as e:
     print(f"Error conectando al broker: {e}")
     exit(1)
 
 client.loop_start()
-
-print(f"Iniciando publicación en topico '{topic}'")
+print(f"Iniciando publicación en tópico '{TOPIC}'")
 
 try:
     while True:
-        valor = sensor.leer_valor()
+        valor     = sensor.leer_valor()
         timestamp = datetime.now().isoformat()
-        datos = {"sensor_id": sensor.id, "valor": valor, "timestamp": timestamp}
-        payload = json.dumps(datos)
-        
-        info = client.publish(topic, payload)
+        datos     = {"sensor_id": sensor.id, "valor": valor, "timestamp": timestamp}
+        payload   = json.dumps(datos)
+
+        info = client.publish(TOPIC, payload)
         info.wait_for_publish()
-        
+
         print(f"Publicado: {payload}")
         time.sleep(2)
 

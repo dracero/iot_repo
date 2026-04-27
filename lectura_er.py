@@ -1,5 +1,6 @@
 import json
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import Optional
@@ -12,11 +13,18 @@ class Lectura(BaseModel):
     timestamp: Optional[str] = None
 
 # Configuración MQTT (mismo broker y tópico que sensor_er.py)
-BROKER = "test.mosquitto.org"
+BROKER = "localhost"
 PORT = 1883
-TOPIC = "iot/telemetria"
+TOPIC = "fadena/test"
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    mqtt_thread = threading.Thread(target=start_mqtt, daemon=True)
+    mqtt_thread.start()
+    print("Cliente MQTT iniciado en segundo plano")
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 # Variable global para almacenar el último dato recibido
 ultimo_dato: Optional[Lectura] = None
@@ -54,13 +62,6 @@ def start_mqtt():
         mqtt_client.loop_forever()
     except Exception as e:
         print(f"Error conectando al broker MQTT: {e}")
-
-@app.on_event("startup")
-async def startup_event():
-    """Inicia el cliente MQTT cuando arranca FastAPI."""
-    mqtt_thread = threading.Thread(target=start_mqtt, daemon=True)
-    mqtt_thread.start()
-    print("Cliente MQTT iniciado en segundo plano")
 
 @app.get("/telemetria")
 async def leer_dato_actual():

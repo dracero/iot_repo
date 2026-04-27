@@ -1,8 +1,55 @@
 import asyncio
 import json
 import random
+import subprocess
+import socket
+import time
 from datetime import datetime
 import paho.mqtt.client as mqtt
+
+# ── Configuración ─────────────────────────────────────────────────────────────
+
+BROKER = "localhost"
+PORT   = 1883
+TOPIC  = "fadena/test"
+
+# ── Mosquitto local ───────────────────────────────────────────────────────────
+
+def _broker_running() -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex((BROKER, PORT)) == 0
+
+def start_broker():
+    if _broker_running():
+        print("Broker Mosquitto ya está corriendo.")
+        return None
+
+    mosquitto_path = subprocess.run(
+        ["which", "mosquitto"], capture_output=True, text=True
+    ).stdout.strip()
+
+    if not mosquitto_path:
+        print("ERROR: Mosquitto no está instalado. Instalalo con: sudo apt install mosquitto")
+        exit(1)
+
+    print("Iniciando broker Mosquitto local...")
+    proc = subprocess.Popen(
+        ["mosquitto", "-p", str(PORT)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    for _ in range(50):
+        if _broker_running():
+            print(f"Broker Mosquitto listo en {BROKER}:{PORT}")
+            return proc
+        time.sleep(0.1)
+    raise RuntimeError("Mosquitto no levantó a tiempo.")
+
+def stop_broker(proc):
+    if proc and proc.poll() is None:
+        print("Deteniendo broker Mosquitto...")
+        proc.terminate()
+        proc.wait()
 
 class SensorVirtual:
     def __init__(self, id, tipo):
@@ -19,9 +66,13 @@ class SensorVirtual:
         return random.randint(0, 100)
 
 # Configuración MQTT
-BROKER = "test.mosquitto.org"
+BROKER = "localhost"
 PORT = 1883
-TOPIC = "iot/telemetria"
+TOPIC = "fadena/test"
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+broker_proc = start_broker()
 
 # Inicializar cliente MQTT
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
@@ -91,3 +142,4 @@ if __name__ == "__main__":
         print("\nDeteniendo sensor...")
         client.loop_stop()
         client.disconnect()
+        stop_broker(broker_proc)

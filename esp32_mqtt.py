@@ -7,7 +7,7 @@ from umqtt.simple import MQTTClient
 
 # Configuration
 WIFI_SSID = "Wokwi-GUEST" # Replace with your open wifi SSID if different
-MQTT_BROKER = "mqtt-dashboard.com"
+MQTT_BROKER = "broker.hivemq.com"
 CLIENT_ID = "fadena_id"
 TOPIC_SUB = "esp32-sub"
 TOPIC_PUB = "fadena/test"
