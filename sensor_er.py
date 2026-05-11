@@ -3,7 +3,6 @@ import json
 import random
 import subprocess
 import socket
-import ssl
 import os
 import time
 from datetime import datetime
@@ -11,10 +10,11 @@ import paho.mqtt.client as mqtt
 
 # ── Configuración ─────────────────────────────────────────────────────────────
 
-BROKER   = "localhost"
-PORT     = 8883
-TOPIC    = "fadena/test"
-CA_CERT  = os.path.expanduser("~/.mosquitto/certs/ca.crt")
+BROKER_LOCAL  = "localhost"
+BROKER_REMOTE = "broker.hivemq.com"
+PORT          = 8883
+TOPIC         = "fadena/test"
+CA_CERT_LOCAL = os.path.expanduser("~/.mosquitto/certs/ca.crt")
 
 # ── Mosquitto local ───────────────────────────────────────────────────────────
 
@@ -78,38 +78,61 @@ class SensorVirtual:
 
 broker_proc = start_broker()
 
-# ── Cliente MQTT con TLS ──────────────────────────────────────────────────────
+# ── Clientes MQTT con TLS ─────────────────────────────────────────────────────
 
-connected = False
+connected_local = False
+connected_remote = False
 
-def on_connect(client, userdata, flags, reason_code, properties):
-    global connected
-    print(f"on_connect llamado: reason_code={reason_code}, type={type(reason_code)}")
+def on_connect_local(client, userdata, flags, reason_code, properties):
+    global connected_local
     if reason_code == 0 or str(reason_code) == "Success":
-        connected = True
-        print(f"Conectado a {BROKER}:{PORT}")
+        connected_local = True
+        print(f"✓ Conectado a broker LOCAL {BROKER_LOCAL}:{PORT}")
     else:
-        print(f"Error de conexión MQTT, código: {reason_code}")
+        print(f"Error conectando a broker LOCAL: {reason_code}")
 
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"sensor-er-{os.getpid()}")
-client.tls_set(ca_certs=CA_CERT)
-client.on_connect = on_connect
+def on_connect_remote(client, userdata, flags, reason_code, properties):
+    global connected_remote
+    if reason_code == 0 or str(reason_code) == "Success":
+        connected_remote = True
+        print(f"✓ Conectado a broker REMOTO {BROKER_REMOTE}:{PORT}")
+    else:
+        print(f"Error conectando a broker REMOTO: {reason_code}")
 
+# Cliente local con certificado local
+client_local = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"sensor-er-local-{os.getpid()}")
+client_local.tls_set(ca_certs=CA_CERT_LOCAL)
+client_local.on_connect = on_connect_local
+
+# Cliente remoto con certificados del sistema
+client_remote = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"sensor-er-remote-{os.getpid()}")
+client_remote.tls_set()  # Usa certificados del sistema
+client_remote.on_connect = on_connect_remote
+
+# Conectar a broker local
 try:
-    client.connect(BROKER, PORT, 60)
-    client.loop_start()
+    client_local.connect(BROKER_LOCAL, PORT, 60)
+    client_local.loop_start()
 except Exception as e:
-    print(f"Error fatal conectando al broker: {e}")
-    stop_broker(broker_proc)
-    exit(1)
+    print(f"⚠ No se pudo conectar a broker local: {e}")
+    client_local = None
 
-# Esperar hasta que la conexión TLS esté establecida (máx 10s)
+# Conectar a broker remoto
+try:
+    client_remote.connect(BROKER_REMOTE, PORT, 60)
+    client_remote.loop_start()
+except Exception as e:
+    print(f"⚠ No se pudo conectar a broker remoto: {e}")
+    client_remote = None
+
+# Esperar conexiones (máx 10s)
 for _ in range(100):
-    if connected:
+    if (not client_local or connected_local) and (not client_remote or connected_remote):
         break
     time.sleep(0.1)
-else:
-    print("Error: No se pudo conectar al broker en 10 segundos.")
+
+if not connected_local and not connected_remote:
+    print("ERROR: No se pudo conectar a ningún broker")
     stop_broker(broker_proc)
     exit(1)
 
@@ -117,7 +140,7 @@ async def enviar_con_reintento(data):
     """
     Intenta enviar datos por MQTT con reintentos y simulación de errores.
     """
-    for i in range(3): # 3 intentos
+    for i in range(3):
         try:
             # Simular error aleatorio de RED (40% de probabilidad)
             if random.random() < 0.4:
@@ -126,14 +149,21 @@ async def enviar_con_reintento(data):
 
             payload = json.dumps(data)
             
-            info = client.publish(TOPIC, payload)
-            info.wait_for_publish() 
+            # Publicar en broker local
+            if client_local and connected_local:
+                info = client_local.publish(TOPIC, payload)
+                info.wait_for_publish()
+                if info.rc == mqtt.MQTT_ERR_SUCCESS:
+                    print(f"[LOCAL] Publicado exitosamente: {payload}")
             
-            if info.rc != mqtt.MQTT_ERR_SUCCESS:
-                raise Exception(f"Error MQTT RC: {info.rc}")
-
-            print(f"Publicado exitosamente: {payload}")
-            return True # Éxito
+            # Publicar en broker remoto
+            if client_remote and connected_remote:
+                info = client_remote.publish(TOPIC, payload)
+                info.wait_for_publish()
+                if info.rc == mqtt.MQTT_ERR_SUCCESS:
+                    print(f"[REMOTO] Publicado exitosamente: {payload}")
+            
+            return True
             
         except Exception as e:
             print(f"Fallo intento {i+1} ({e}). Reintentando en 2s...")
@@ -149,7 +179,6 @@ async def main():
     while True:
         try:
             valor = sensor.leer_valor()
-            # Añadir timestamp ISO 8601
             timestamp = datetime.now().isoformat()
             datos = {
                 "sensor_id": sensor.id, 
@@ -162,7 +191,6 @@ async def main():
         except Exception as e:
             print(f"Error leyendo sensor: {e}")
         
-        # Esperar antes de la siguiente lectura
         await asyncio.sleep(5)
 
 if __name__ == "__main__":
@@ -170,6 +198,10 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nDeteniendo sensor...")
-        client.loop_stop()
-        client.disconnect()
+        if client_local:
+            client_local.loop_stop()
+            client_local.disconnect()
+        if client_remote:
+            client_remote.loop_stop()
+            client_remote.disconnect()
         stop_broker(broker_proc)

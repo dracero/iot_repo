@@ -19,7 +19,11 @@ openssl x509 -req -in "$CERT_DIR/server.csr" -CA "$CERT_DIR/ca.crt" -CAkey "$CER
 
 echo "Creando archivo de configuración Mosquitto..."
 cat > "$CONF_FILE" << EOF
-# Solo puerto con TLS (sin puerto 1883 para evitar conflictos)
+# Puerto sin TLS para sensor_mq/lectura_mq
+listener 1883
+allow_anonymous true
+
+# Puerto con TLS para sensor_er/lectura_er
 listener 8883
 cafile $CERT_DIR/ca.crt
 certfile $CERT_DIR/server.crt

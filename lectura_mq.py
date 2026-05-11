@@ -1,5 +1,4 @@
 import json
-import socket
 import threading
 import uvicorn
 from fastapi import FastAPI
@@ -26,13 +25,6 @@ BROKER_REMOTE = "mqtt-dashboard.com"
 PORT          = 1883
 TOPIC         = "fadena/test"
 
-def _broker_running(host: str) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex((host, PORT)) == 0
-
-BROKER = BROKER_REMOTE  # Siempre usar broker remoto para recibir del ESP32
-print(f"Usando broker: {BROKER}")
-
 # ── Estado global ─────────────────────────────────────────────────────────────
 
 ultimo_dato: Optional[Lectura] = None
@@ -40,15 +32,21 @@ mensajes_recibidos: list = []
 
 # ── Callbacks MQTT ────────────────────────────────────────────────────────────
 
-def on_connect(client, userdata, flags, rc, properties=None):
-    print(f"Conectado al broker MQTT {BROKER} con código: {rc}")
+def on_connect_local(client, userdata, flags, reason_code, properties):
+    print(f"Conectado al broker LOCAL con código: {reason_code}")
     client.subscribe(TOPIC)
-    print(f"Suscrito al tópico: {TOPIC}")
+    print(f"Suscrito al tópico: {TOPIC} (local)")
+
+def on_connect_remote(client, userdata, flags, reason_code, properties):
+    print(f"Conectado al broker REMOTO con código: {reason_code}")
+    client.subscribe(TOPIC)
+    print(f"Suscrito al tópico: {TOPIC} (remoto)")
 
 def on_message(client, userdata, msg):
     global ultimo_dato, mensajes_recibidos
     payload = msg.payload.decode()
-    print(f"Recibido en {msg.topic}: {payload}")
+    broker_type = userdata.get('broker_type', 'unknown')
+    print(f"[{broker_type.upper()}] Recibido en {msg.topic}: {payload}")
     try:
         data_dict = json.loads(payload)
         ultimo_dato = Lectura(**data_dict)
@@ -58,18 +56,29 @@ def on_message(client, userdata, msg):
     except Exception as e:
         print(f"Error procesando mensaje: {e}")
 
-# ── Cliente MQTT en hilo separado ─────────────────────────────────────────────
+# ── Clientes MQTT en hilos separados ──────────────────────────────────────────
 
-mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-mqtt_client.on_connect = on_connect
-mqtt_client.on_message = on_message
+mqtt_client_local = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="lectura-mq-local", userdata={'broker_type': 'local'})
+mqtt_client_local.on_connect = on_connect_local
+mqtt_client_local.on_message = on_message
 
-def start_mqtt():
+mqtt_client_remote = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="lectura-mq-remote", userdata={'broker_type': 'remoto'})
+mqtt_client_remote.on_connect = on_connect_remote
+mqtt_client_remote.on_message = on_message
+
+def start_mqtt_local():
     try:
-        mqtt_client.connect(BROKER, PORT, 60)
-        mqtt_client.loop_forever()
+        mqtt_client_local.connect(BROKER_LOCAL, PORT, 60)
+        mqtt_client_local.loop_forever()
     except Exception as e:
-        print(f"Error conectando al broker MQTT: {e}")
+        print(f"Error conectando al broker LOCAL: {e}")
+
+def start_mqtt_remote():
+    try:
+        mqtt_client_remote.connect(BROKER_REMOTE, PORT, 60)
+        mqtt_client_remote.loop_forever()
+    except Exception as e:
+        print(f"Error conectando al broker REMOTO: {e}")
 
 # ── FastAPI ───────────────────────────────────────────────────────────────────
 
@@ -77,13 +86,22 @@ app = FastAPI(title="Lector MQTT")
 
 @app.on_event("startup")
 async def startup_event():
-    thread = threading.Thread(target=start_mqtt, daemon=True)
-    thread.start()
-    print("Cliente MQTT iniciado en segundo plano")
+    thread_local = threading.Thread(target=start_mqtt_local, daemon=True)
+    thread_local.start()
+    thread_remote = threading.Thread(target=start_mqtt_remote, daemon=True)
+    thread_remote.start()
+    print("Clientes MQTT iniciados en segundo plano (local + remoto)")
 
 @app.get("/")
 async def home():
-    return {"message": "Lector MQTT activo", "broker": BROKER, "topic": TOPIC}
+    return {
+        "message": "Lector MQTT activo", 
+        "brokers": {
+            "local": BROKER_LOCAL,
+            "remoto": BROKER_REMOTE
+        },
+        "topic": TOPIC
+    }
 
 @app.get("/telemetria")
 async def leer_dato_actual():
@@ -95,4 +113,6 @@ async def leer_historial():
 
 if __name__ == "__main__":
     print("Iniciando servidor de lectura MQTT en http://localhost:8001...")
+    print(f"Escuchando en broker local: {BROKER_LOCAL}:{PORT}")
+    print(f"Escuchando en broker remoto: {BROKER_REMOTE}:{PORT}")
     uvicorn.run(app, host="0.0.0.0", port=8001)

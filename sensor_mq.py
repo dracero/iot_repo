@@ -6,9 +6,10 @@ import paho.mqtt.client as mqtt
 
 # ── Configuración ─────────────────────────────────────────────────────────────
 
-BROKER = "mqtt-dashboard.com"
-PORT   = 1883
-TOPIC  = "fadena/test"
+BROKER_LOCAL  = "localhost"
+BROKER_REMOTE = "mqtt-dashboard.com"
+PORT          = 1883
+TOPIC         = "fadena/test"
 
 # ── Sensor virtual ────────────────────────────────────────────────────────────
 
@@ -25,16 +26,34 @@ class SensorVirtual:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 sensor = SensorVirtual("S-001", "temperatura")
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 
-print(f"Conectando a broker {BROKER}:{PORT}...")
+# Cliente para broker local
+client_local = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="sensor-mq-local")
+# Cliente para broker remoto
+client_remote = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="sensor-mq-remote")
+
+print(f"Conectando a broker local {BROKER_LOCAL}:{PORT}...")
 try:
-    client.connect(BROKER, PORT, 60)
+    client_local.connect(BROKER_LOCAL, PORT, 60)
+    client_local.loop_start()
+    print(f"✓ Conectado a {BROKER_LOCAL}")
 except Exception as e:
-    print(f"Error conectando al broker: {e}")
+    print(f"⚠ No se pudo conectar a broker local: {e}")
+    client_local = None
+
+print(f"Conectando a broker remoto {BROKER_REMOTE}:{PORT}...")
+try:
+    client_remote.connect(BROKER_REMOTE, PORT, 60)
+    client_remote.loop_start()
+    print(f"✓ Conectado a {BROKER_REMOTE}")
+except Exception as e:
+    print(f"⚠ No se pudo conectar a broker remoto: {e}")
+    client_remote = None
+
+if not client_local and not client_remote:
+    print("ERROR: No se pudo conectar a ningún broker")
     exit(1)
 
-client.loop_start()
 print(f"Iniciando publicación en tópico '{TOPIC}'")
 
 try:
@@ -44,13 +63,25 @@ try:
         datos     = {"sensor_id": sensor.id, "valor": valor, "timestamp": timestamp}
         payload   = json.dumps(datos)
 
-        info = client.publish(TOPIC, payload)
-        info.wait_for_publish()
+        # Publicar en broker local
+        if client_local:
+            info = client_local.publish(TOPIC, payload)
+            info.wait_for_publish()
+            print(f"[LOCAL] Publicado: {payload}")
 
-        print(f"Publicado: {payload}")
+        # Publicar en broker remoto
+        if client_remote:
+            info = client_remote.publish(TOPIC, payload)
+            info.wait_for_publish()
+            print(f"[REMOTO] Publicado: {payload}")
+
         time.sleep(2)
 
 except KeyboardInterrupt:
     print("Deteniendo sensor...")
-    client.loop_stop()
-    client.disconnect()
+    if client_local:
+        client_local.loop_stop()
+        client_local.disconnect()
+    if client_remote:
+        client_remote.loop_stop()
+        client_remote.disconnect()

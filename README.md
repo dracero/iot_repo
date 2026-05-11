@@ -165,11 +165,11 @@ El proyecto contiene múltiples pares de scripts sensor/lector para demostrar di
 | Protocolo | Sensor | Lector | Broker/Servidor | Puerto |
 |-----------|--------|--------|-----------------|--------|
 | **HTTP** | `sensor.py` | `lectura.py` | FastAPI local | 8000 |
-| **MQTT básico** | `sensor_mq.py` | `lectura_mq.py` | mqtt-dashboard.com | 1883 |
+| **MQTT básico** | `sensor_mq.py` | `lectura_mq.py` | Mosquitto local | 1883 |
 | **MQTT + errores** | `sensor_er.py` | `lectura_er.py` | Mosquitto local TLS | 8883 |
 | **WebSocket** | `ws_client.py` | `ws_server.py` | WebSocket local | 8000 |
 | **CoAP** | `coap_client.py` | `coap_server.py` | CoAP local | 5683 (UDP) |
-| **ESP32 (Wokwi)** | `esp32_mqtt.py` | `lectura_mq.py` | mqtt-dashboard.com | 1883 |
+| **ESP32 (Wokwi)** | `esp32_mqtt.py` | N/A | mqtt-dashboard.com | 1883 |
 
 ### Flujo de Datos
 
@@ -204,9 +204,11 @@ uv run python sensor.py
 
 ### MQTT (Message Queue Telemetry Transport)
 
-Estos scripts demuestran el protocolo MQTT para mensajería IoT usando el broker público **mqtt-dashboard.com** en el puerto **1883**.
+Estos scripts demuestran el protocolo MQTT publicando **simultáneamente en dos brokers**:
+- **Broker local:** `localhost:1883` (Mosquitto) → tráfico visible en interfaz `lo` de Wireshark
+- **Broker remoto:** `mqtt-dashboard.com:1883` → tráfico visible en interfaz de red (`wlan0`/`eth0`)
 
-El broker es compartido con el ESP32 en Wokwi, por lo que `lectura_mq.py` también recibe los datos del ESP32.
+Esto permite comparar tráfico local vs remoto en Wireshark.
 
 **1. Primero - Suscriptor (Lectura):**
 ```bash
@@ -221,13 +223,23 @@ Servidor en http://localhost:8001 con endpoints:
 uv run python sensor_mq.py
 ```
 
+Verás en consola:
+```
+[LOCAL] Publicado: {"sensor_id": "S-001", "valor": 25.3, ...}
+[REMOTO] Publicado: {"sensor_id": "S-001", "valor": 25.3, ...}
+```
+
+> **Nota:** Mosquitto debe estar corriendo en `localhost:1883`. Si no está, inicialo con: `mosquitto -c ~/.mosquitto/mosquitto.conf`
+
 ---
 
 ### MQTT con Simulación de Errores
 
-Estos scripts demuestran MQTT con lógica de reintentos y simulación de errores de red/hardware usando **Mosquitto local con TLS** en el puerto **8883**.
+Estos scripts demuestran MQTT con lógica de reintentos y simulación de errores de red/hardware, publicando **simultáneamente en dos brokers con TLS**:
+- **Broker local:** `localhost:8883` (Mosquitto TLS) → tráfico visible en interfaz `lo` de Wireshark
+- **Broker remoto:** `broker.hivemq.com:8883` (TLS) → tráfico visible en interfaz de red (`wlan0`/`eth0`)
 
-Usa certificados autofirmados generados por `setup_mosquitto_tls.sh`. `sensor_er.py` levanta Mosquitto automáticamente con la configuración TLS.
+Usa certificados autofirmados para el broker local y certificados del sistema para el remoto.
 
 > Requiere ejecutar `./setup_mosquitto_tls.sh` una vez antes del primer uso (ver sección de instalación arriba).
 > Iniciá siempre `sensor_er.py` antes que `lectura_er.py`.
@@ -235,6 +247,12 @@ Usa certificados autofirmados generados por `setup_mosquitto_tls.sh`. `sensor_er
 **1. Primero - Publicador (levanta Mosquitto y publica datos):**
 ```bash
 uv run python sensor_er.py
+```
+
+Verás en consola:
+```
+[LOCAL] Publicado exitosamente: {"sensor_id": "SENSOR_ER_01", ...}
+[REMOTO] Publicado exitosamente: {"sensor_id": "SENSOR_ER_01", ...}
 ```
 
 **2. Después - Suscriptor (Lectura):**
@@ -284,7 +302,7 @@ uv run python coap_client.py
 
 El script `esp32_mqtt.py` corre en el simulador [Wokwi](https://wokwi.com) sobre un ESP32 con sensor DHT22. Publica datos de temperatura y humedad en el broker **mqtt-dashboard.com:1883**, tópico `fadena/test`.
 
-Para ver los datos en tu PC, corré `lectura_mq.py` que escucha el mismo broker y tópico.
+**Nota:** El ESP32 usa un broker remoto público (`mqtt-dashboard.com`), no el Mosquitto local. Para ver sus datos necesitarías cambiar `lectura_mq.py` temporalmente al broker remoto o usar el cliente web de MQTT.
 
 ---
 
@@ -310,8 +328,8 @@ Para analizar el tráfico de cada protocolo, abre Wireshark en la interfaz `lo` 
 | Protocolo | Filtro Wireshark | Puerto |
 |-----------|------------------|--------|
 | **HTTP** (lectura + sensor) | `tcp.port == 8000` | 8000 |
-| **MQTT** (lectura_mq + sensor_mq + ESP32) | `tcp.port == 1883` | 1883 (mqtt-dashboard.com) |
-| **MQTT con errores** (lectura_er + sensor_er) | `tcp.port == 8883` | 8883 (Mosquitto local TLS) |
+| **MQTT básico** (lectura_mq + sensor_mq) | `tcp.port == 1883` | 1883 (local Y remoto) |
+| **MQTT con errores** (lectura_er + sensor_er) | `tcp.port == 8883` | 8883 (local TLS Y remoto TLS) |
 | **WebSocket** (ws_server + ws_client) | `websocket` o `tcp.port == 8000` | 8000 |
 | **CoAP** (coap_server + coap_client) | `coap` o `udp.port == 5683` | 5683 |
 
